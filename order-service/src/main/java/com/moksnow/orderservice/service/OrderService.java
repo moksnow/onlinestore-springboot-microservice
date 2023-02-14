@@ -3,12 +3,14 @@ package com.moksnow.orderservice.service;
 import com.moksnow.orderservice.dto.InventoryResponse;
 import com.moksnow.orderservice.dto.OrderLineItemsDto;
 import com.moksnow.orderservice.dto.OrderRequest;
+import com.moksnow.orderservice.event.OrderPlacedEvent;
 import com.moksnow.orderservice.model.Order;
 import com.moksnow.orderservice.model.OrderLineItems;
 import com.moksnow.orderservice.repository.OrderRepository;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import lombok.RequiredArgsConstructor;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -24,8 +26,8 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final WebClient.Builder webClientBuilder;
-
     private final Tracer tracer;
+    private final KafkaTemplate<String, OrderPlacedEvent> kafkaTemplate;
 
 
     public String placeOder(OrderRequest orderRequest) {
@@ -44,8 +46,8 @@ public class OrderService {
                 .map(OrderLineItems::getSkuCode)
                 .toList();
 
-        Span inventoryServiceLookup = tracer.nextSpan().name("InventoryServiceLookup");
-        try (Tracer.SpanInScope spanInScope = tracer.withSpan(inventoryServiceLookup.start())) {
+//        Span inventoryServiceLookup = tracer.nextSpan().name("InventoryServiceLookup");
+//        try (Tracer.SpanInScope spanInScope = tracer.withSpan(inventoryServiceLookup.start())) {
 
             // call inventory service, and place order if product is in stock
             InventoryResponse[] result = webClientBuilder.build().get()
@@ -60,14 +62,16 @@ public class OrderService {
 
             if (allProductsInStock) {
                 orderRepository.save(order);
+
+                kafkaTemplate.send("notificationTopic", new OrderPlacedEvent(order.getOrderNumber()));
                 return "Order Placed successfully";
             } else {
                 throw new IllegalArgumentException("Product is not ins stock, please try again later");
             }
-        } finally {
-
-            inventoryServiceLookup.end();
-        }
+//        } finally {
+//
+//            inventoryServiceLookup.end();
+//        }
 
 
     }
